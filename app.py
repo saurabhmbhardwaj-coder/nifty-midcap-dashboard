@@ -6,11 +6,10 @@ from data_loader import load_data
 from volatility import garch_volatility
 from ratios import get_ratios
 from stocks import stocks
-from heatmap import create_heatmap
 
 st.set_page_config(layout="wide")
 
-st.title("Quant Equity Research Dashboard")
+st.title("Volatility Analysis Dashboard")
 
 # -------- STOCK LIST -------- #
 
@@ -24,106 +23,143 @@ selected = st.selectbox(
 all_tickers
 )
 
+# -------- DATA -------- #
+
 data = load_data(selected)
 
-if not data.empty:
+if data is None or data.empty:
 
-    col1,col2 = st.columns([3,1])
+    st.error("Stock data could not be loaded.")
 
-    with col1:
+else:
 
-        fig = px.line(
-        data,
-        y="Close",
-        title="Price Chart (2 Years)"
-        )
+    # Ensure correct column exists
+    if "Close" not in data.columns:
 
-        st.plotly_chart(fig,use_container_width=True)
+        st.error("Price column not found in data.")
 
-    with col2:
+    else:
 
-        vol = garch_volatility(data["Close"])
+        data = data.reset_index()
 
-        st.metric(
-        "GARCH Volatility",
-        round(vol,2)
-        )
+        col1, col2 = st.columns([3,1])
 
-        if vol < 1.5:
-            st.success("Low Volatility")
+        with col1:
 
-        elif vol < 3:
-            st.warning("Moderate Volatility")
+            fig = px.line(
+                data,
+                x="Date",
+                y="Close",
+                title="Stock Price (Last 2 Years)"
+            )
 
-        else:
-            st.error("High Volatility")
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+
+            vol = garch_volatility(data["Close"])
+
+            st.metric(
+                "GARCH Volatility",
+                round(vol,2)
+            )
+
+            if vol < 1.5:
+
+                st.success("Low Volatility")
+
+            elif vol < 3:
+
+                st.warning("Moderate Volatility")
+
+            else:
+
+                st.error("High Volatility")
+
 
 # -------- INDUSTRY COMPARISON -------- #
 
-st.subheader("Industry Comparison")
+st.subheader("Industry Volatility Comparison")
 
-sector_name=None
+sector_name = None
 
 for s in stocks:
 
     if selected in stocks[s]:
-        sector_name=s
 
-comparison=[]
+        sector_name = s
 
-for ticker in stocks[sector_name]:
+comparison = []
 
-    d=load_data(ticker)
+if sector_name:
 
-    if not d.empty:
+    for ticker in stocks[sector_name]:
 
-        v=garch_volatility(d["Close"])
+        d = load_data(ticker)
 
-        comparison.append([ticker,v])
+        if d is not None and not d.empty and "Close" in d.columns:
 
-df=pd.DataFrame(
-comparison,
-columns=["Stock","Volatility"]
-)
+            vol = garch_volatility(d["Close"])
 
-st.bar_chart(df.set_index("Stock"))
+            comparison.append([ticker, vol])
 
-# -------- EXPORT -------- #
+if comparison:
+
+    df = pd.DataFrame(
+        comparison,
+        columns=["Stock","Volatility"]
+    )
+
+    st.bar_chart(df.set_index("Stock"))
+
+
+# -------- CSV EXPORT -------- #
 
 st.download_button(
+
 "Download CSV",
+
 data.to_csv(),
+
 "stock_data.csv"
+
 )
 
-# -------- SECTOR BUTTONS -------- #
+
+# -------- SECTOR VOLATILITY BUTTONS -------- #
 
 st.subheader("Sector Volatility")
 
-cols=st.columns(len(stocks))
+cols = st.columns(len(stocks))
 
 for i,sector in enumerate(stocks):
 
     if cols[i].button(sector):
 
-        vols=[]
+        vols = []
 
         for ticker in stocks[sector]:
 
-            d=load_data(ticker)
+            d = load_data(ticker)
 
-            if not d.empty:
+            if d is not None and not d.empty and "Close" in d.columns:
 
                 vols.append(
-                garch_volatility(d["Close"])
+                    garch_volatility(d["Close"])
                 )
 
-        st.line_chart(vols)
+        sector_df = pd.DataFrame(
+            vols,
+            columns=["Volatility"]
+        )
 
-# -------- RATIOS -------- #
+        st.line_chart(sector_df)
+
+
+# -------- FINANCIAL RATIOS -------- #
 
 st.subheader("Financial Ratios")
 
-ratios=get_ratios(selected)
+ratios = get_ratios(selected)
 
 st.json(ratios)
