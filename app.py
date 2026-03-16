@@ -18,35 +18,32 @@ all_tickers = []
 for sector in stocks:
     all_tickers += stocks[sector]
 
-selected = st.selectbox(
-"Select Stock",
-all_tickers
-)
+selected = st.selectbox("Select Stock", all_tickers)
 
-# -------- DATA -------- #
+# -------- LOAD DATA -------- #
 
 data = load_data(selected)
 
 if data is None or data.empty:
 
-    st.error("Stock data could not be loaded.")
+    st.error("Unable to load stock data.")
 
 else:
 
+    # ---- FIX MULTI INDEX COLUMNS ---- #
+
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
+
+    # ---- RESET INDEX ---- #
+
+    data = data.reset_index()
+
     if "Close" not in data.columns:
 
-        st.error("Price column missing.")
+        st.error("Close price column missing.")
 
     else:
-
-        data = data.copy()
-
-        # convert index to column
-        data["Date"] = data.index
-
-        data["Close"] = pd.to_numeric(data["Close"], errors="coerce")
-
-        data = data.dropna()
 
         col1, col2 = st.columns([3,1])
 
@@ -75,22 +72,17 @@ else:
 
             vol = garch_volatility(data["Close"])
 
-            st.metric(
-                "GARCH Volatility",
-                round(vol,2)
-            )
+            st.metric("GARCH Volatility", round(vol,2))
 
             if vol < 1.5:
-
                 st.success("Low Volatility")
 
             elif vol < 3:
-
                 st.warning("Moderate Volatility")
 
             else:
-
                 st.error("High Volatility")
+
 
 # -------- INDUSTRY COMPARISON -------- #
 
@@ -99,9 +91,7 @@ st.subheader("Industry Volatility Comparison")
 sector_name = None
 
 for s in stocks:
-
     if selected in stocks[s]:
-
         sector_name = s
 
 comparison = []
@@ -112,20 +102,21 @@ if sector_name:
 
         d = load_data(ticker)
 
-        if d is not None and not d.empty and "Close" in d.columns:
+        if d is not None and not d.empty:
 
-            v = garch_volatility(d["Close"])
+            if isinstance(d.columns, pd.MultiIndex):
+                d.columns = d.columns.get_level_values(0)
 
-            comparison.append([ticker, v])
+            vol = garch_volatility(d["Close"])
+
+            comparison.append([ticker, vol])
 
 if comparison:
 
-    df = pd.DataFrame(
-        comparison,
-        columns=["Stock","Volatility"]
-    )
+    df = pd.DataFrame(comparison, columns=["Stock","Volatility"])
 
     st.bar_chart(df.set_index("Stock"))
+
 
 # -------- CSV EXPORT -------- #
 
@@ -134,6 +125,7 @@ st.download_button(
 data.to_csv(),
 "stock_data.csv"
 )
+
 
 # -------- SECTOR VOLATILITY BUTTONS -------- #
 
@@ -151,18 +143,17 @@ for i,sector in enumerate(stocks):
 
             d = load_data(ticker)
 
-            if d is not None and not d.empty and "Close" in d.columns:
+            if d is not None and not d.empty:
 
-                vols.append(
-                    garch_volatility(d["Close"])
-                )
+                if isinstance(d.columns, pd.MultiIndex):
+                    d.columns = d.columns.get_level_values(0)
 
-        sector_df = pd.DataFrame(
-            vols,
-            columns=["Volatility"]
-        )
+                vols.append(garch_volatility(d["Close"]))
+
+        sector_df = pd.DataFrame(vols, columns=["Volatility"])
 
         st.line_chart(sector_df)
+
 
 # -------- FINANCIAL RATIOS -------- #
 
