@@ -7,93 +7,91 @@ from arch import arch_model
 import os
 
 st.set_page_config(
-page_title="Volatility Analysis Dashboard",
+page_title="Volatility Analytics Dashboard",
 layout="wide",
 initial_sidebar_state="collapsed"
 )
 
-# ---------------- THEME ---------------- #
+# ---------------- DARK OLIVE THEME ---------------- #
 
 st.markdown("""
 <style>
-
 .stApp{
 background-color:#2F3E2F;
 color:#F5F5DC;
 }
-
 h1,h2,h3{
 color:#F5F5DC;
 }
-
 [data-testid="stMetric"]{
 background-color:#3E533E;
 padding:10px;
 border-radius:8px;
 color:#F5F5DC;
 }
-
 .stButton>button{
 background-color:#556B2F;
 color:#F5F5DC;
 border-radius:8px;
 }
-
 </style>
 """,unsafe_allow_html=True)
 
-st.title("Volatility Analysis Dashboard")
+st.title("Volatility Analytics Dashboard")
 
-# ---------------- COMPANY LIST ---------------- #
+# ---------------- LOAD COMPANY LIST ---------------- #
 
 file_path="midcap150.xlsx"
 
 if not os.path.exists(file_path):
-    st.error("midcap150.xlsx file not found.")
+    st.error("midcap150.xlsx file missing.")
     st.stop()
 
 companies=pd.read_excel(file_path)
 
 companies["Ticker"]=companies["Symbol"]+".NS"
 
-company=st.selectbox("Select Company",companies["Company Name"])
+company=st.selectbox(
+"Select Company",
+companies["Company Name"]
+)
 
 row=companies[companies["Company Name"]==company].iloc[0]
 
 ticker=row["Ticker"]
 industry=row["Industry"]
 
-# ---------------- DATA ---------------- #
+# ---------------- DATA LOADER ---------------- #
 
 @st.cache_data
-def load_data(t):
+def load_data(ticker):
 
-    d=yf.download(t,period="2y",progress=False)
+    data=yf.download(ticker,period="2y",progress=False)
 
-    if isinstance(d.columns,pd.MultiIndex):
-        d.columns=d.columns.get_level_values(0)
+    if isinstance(data.columns,pd.MultiIndex):
+        data.columns=data.columns.get_level_values(0)
 
-    d=d.reset_index()
+    data=data.reset_index()
 
-    return d
+    return data
 
 data=load_data(ticker)
 
 if data.empty:
-    st.error("Stock data unavailable")
+    st.error("Stock data unavailable.")
     st.stop()
 
 current_price=float(data["Close"].iloc[-1])
 
-# ---------------- GARCH ---------------- #
+# ---------------- GARCH VOLATILITY ---------------- #
 
 returns=100*data["Close"].pct_change().dropna()
 
 model=arch_model(returns,p=1,q=1)
 
-result=model.fit(disp="off")
+res=model.fit(disp="off")
 
-forecast=result.forecast(horizon=10)
+forecast=res.forecast(horizon=10)
 
 volatility=np.sqrt(forecast.variance.iloc[-1,0])
 
@@ -101,24 +99,25 @@ forecast_curve=np.sqrt(forecast.variance.values[-1])
 
 # ---------------- KPI STRIP ---------------- #
 
-col1,col2,col3,col4=st.columns(4)
+c1,c2,c3,c4=st.columns(4)
 
-col1.metric("Company",company)
-col2.metric("Sector",industry)
-col3.metric("Current Price",round(current_price,2))
-col4.metric("GARCH Volatility",round(volatility,2))
+c1.metric("Company",company)
+c2.metric("Sector",industry)
+c3.metric("Current Price",round(current_price,2))
+c4.metric("GARCH Volatility",round(volatility,2))
 
 # ---------------- TABS ---------------- #
 
-tab1,tab2,tab3,tab4,tab5 = st.tabs([
+tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs([
 "Stock Overview",
 "Volatility Forecast",
-"Sector Analysis",
+"Risk Return",
+"Sector Dashboard",
 "Portfolio Analytics",
-"Financials"
+"Financial Ratios"
 ])
 
-# ---------------- PRICE CHART ---------------- #
+# ---------------- STOCK CHART ---------------- #
 
 with tab1:
 
@@ -161,9 +160,73 @@ with tab2:
 
     st.plotly_chart(fig,use_container_width=True)
 
-# ---------------- SECTOR ANALYSIS ---------------- #
+    # Multi-factor volatility using market beta
+
+    market_data=load_data("^NSEI")
+
+    stock_returns=data["Close"].pct_change().dropna()
+    market_returns=market_data["Close"].pct_change().dropna()
+
+    combined=pd.concat([stock_returns,market_returns],axis=1).dropna()
+
+    combined.columns=["Stock","Market"]
+
+    beta=np.cov(combined["Stock"],combined["Market"])[0][1]/np.var(combined["Market"])
+
+    st.metric("Market Beta (Factor Exposure)",round(beta,3))
+
+# ---------------- RISK RETURN SCATTER ---------------- #
 
 with tab3:
+
+    stocks=st.multiselect(
+    "Select Stocks",
+    companies["Company Name"]
+    )
+
+    if stocks:
+
+        rr_data=[]
+
+        for s in stocks:
+
+            t=companies.loc[
+            companies["Company Name"]==s,"Ticker"
+            ].values[0]
+
+            d=load_data(t)
+
+            r=d["Close"].pct_change().dropna()
+
+            mean=r.mean()*252
+            risk=r.std()*np.sqrt(252)
+
+            rr_data.append([s,mean,risk])
+
+        rr_df=pd.DataFrame(
+        rr_data,
+        columns=["Stock","Return","Risk"]
+        )
+
+        fig=go.Figure()
+
+        fig.add_trace(go.Scatter(
+        x=rr_df["Risk"],
+        y=rr_df["Return"],
+        mode="markers+text",
+        text=rr_df["Stock"]
+        ))
+
+        fig.update_layout(
+        xaxis_title="Risk (Volatility)",
+        yaxis_title="Expected Return"
+        )
+
+        st.plotly_chart(fig,use_container_width=True)
+
+# ---------------- INTERACTIVE SECTOR DASHBOARD ---------------- #
+
+with tab4:
 
     sector_data=companies[companies["Industry"]==industry]
 
@@ -209,7 +272,7 @@ with tab3:
 
 # ---------------- PORTFOLIO ANALYTICS ---------------- #
 
-with tab4:
+with tab5:
 
     portfolio=st.multiselect(
     "Select Portfolio Stocks",
@@ -220,15 +283,15 @@ with tab4:
 
         returns_df=pd.DataFrame()
 
-        for stock in portfolio:
+        for s in portfolio:
 
             t=companies.loc[
-            companies["Company Name"]==stock,"Ticker"
+            companies["Company Name"]==s,"Ticker"
             ].values[0]
 
             d=load_data(t)
 
-            returns_df[stock]=d["Close"].pct_change()
+            returns_df[s]=d["Close"].pct_change()
 
         returns_df=returns_df.dropna()
 
@@ -246,9 +309,7 @@ with tab4:
 
 # ---------------- FINANCIAL RATIOS ---------------- #
 
-with tab5:
-
-    st.subheader("Financial Ratios")
+with tab6:
 
     info=yf.Ticker(ticker).info
 
@@ -268,30 +329,6 @@ with tab5:
     )
 
     st.table(ratio_df)
-
-    st.subheader("Ratio Interpretation")
-
-    learn_df=pd.DataFrame({
-
-    "Ratio":[
-    "PE Ratio",
-    "Price to Book",
-    "Return on Equity",
-    "Debt to Equity",
-    "Profit Margin"
-    ],
-
-    "Interpretation":[
-    "Shows valuation relative to earnings",
-    "Compares market value with assets",
-    "Measures efficiency of shareholder capital",
-    "Indicates financial leverage",
-    "Shows company profitability"
-    ]
-
-    })
-
-    st.table(learn_df)
 
 st.download_button(
 "Download CSV",
