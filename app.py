@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 
 from data_loader import load_data
 from volatility import garch_volatility
@@ -33,24 +33,40 @@ if data is None or data.empty:
 
 else:
 
-    # Ensure correct column exists
     if "Close" not in data.columns:
 
-        st.error("Price column not found in data.")
+        st.error("Price column missing.")
 
     else:
 
-        data = data.reset_index()
+        data = data.copy()
+
+        # convert index to column
+        data["Date"] = data.index
+
+        data["Close"] = pd.to_numeric(data["Close"], errors="coerce")
+
+        data = data.dropna()
 
         col1, col2 = st.columns([3,1])
 
         with col1:
 
-            fig = px.line(
-                data,
-                x="Date",
-                y="Close",
-                title="Stock Price (Last 2 Years)"
+            fig = go.Figure()
+
+            fig.add_trace(
+                go.Scatter(
+                    x=data["Date"],
+                    y=data["Close"],
+                    mode="lines",
+                    name="Price"
+                )
+            )
+
+            fig.update_layout(
+                title="Stock Price (Last 2 Years)",
+                xaxis_title="Date",
+                yaxis_title="Price"
             )
 
             st.plotly_chart(fig, use_container_width=True)
@@ -76,7 +92,6 @@ else:
 
                 st.error("High Volatility")
 
-
 # -------- INDUSTRY COMPARISON -------- #
 
 st.subheader("Industry Volatility Comparison")
@@ -99,9 +114,9 @@ if sector_name:
 
         if d is not None and not d.empty and "Close" in d.columns:
 
-            vol = garch_volatility(d["Close"])
+            v = garch_volatility(d["Close"])
 
-            comparison.append([ticker, vol])
+            comparison.append([ticker, v])
 
 if comparison:
 
@@ -112,19 +127,13 @@ if comparison:
 
     st.bar_chart(df.set_index("Stock"))
 
-
 # -------- CSV EXPORT -------- #
 
 st.download_button(
-
 "Download CSV",
-
 data.to_csv(),
-
 "stock_data.csv"
-
 )
-
 
 # -------- SECTOR VOLATILITY BUTTONS -------- #
 
@@ -154,7 +163,6 @@ for i,sector in enumerate(stocks):
         )
 
         st.line_chart(sector_df)
-
 
 # -------- FINANCIAL RATIOS -------- #
 
