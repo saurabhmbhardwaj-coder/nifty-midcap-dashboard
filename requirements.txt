@@ -4,5 +4,4 @@ pandas
 numpy
 plotly
 arch
-seaborn
-scikit-learn
+openpyxl
