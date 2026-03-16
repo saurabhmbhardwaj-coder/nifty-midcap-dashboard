@@ -24,14 +24,14 @@ background-color:#2F3E2F;
 color:#F5F5DC;
 }
 
-h1,h2,h3,h4{
+h1,h2,h3{
 color:#F5F5DC;
 }
 
 [data-testid="stMetric"]{
 background-color:#3E533E;
-padding:12px;
-border-radius:10px;
+padding:10px;
+border-radius:8px;
 color:#F5F5DC;
 }
 
@@ -39,11 +39,6 @@ color:#F5F5DC;
 background-color:#556B2F;
 color:#F5F5DC;
 border-radius:8px;
-border:none;
-}
-
-table{
-color:#F5F5DC;
 }
 
 </style>
@@ -56,14 +51,21 @@ st.title("Volatility Analysis Dashboard")
 file_path="midcap150.xlsx"
 
 if not os.path.exists(file_path):
-    st.error("midcap150.xlsx file not found in repository.")
+    st.error("midcap150.xlsx file not found.")
     st.stop()
 
 companies=pd.read_excel(file_path)
 
 companies["Ticker"]=companies["Symbol"]+".NS"
 
-company=st.selectbox("Select Company",companies["Company Name"])
+company=st.selectbox(
+"Select Company",
+companies["Company Name"],
+index=None
+)
+
+if company is None:
+    st.stop()
 
 row=companies[companies["Company Name"]==company].iloc[0]
 
@@ -90,7 +92,11 @@ if data.empty:
     st.error("Unable to fetch stock data")
     st.stop()
 
-# ---------------- VOLATILITY CALCULATION ---------------- #
+# ---------------- CURRENT PRICE ---------------- #
+
+current_price=float(data["Close"].iloc[-1])
+
+# ---------------- GARCH MODEL ---------------- #
 
 returns=100*data["Close"].pct_change().dropna()
 
@@ -98,31 +104,34 @@ model=arch_model(returns,p=1,q=1)
 
 result=model.fit(disp="off")
 
-forecast=result.forecast(horizon=5)
+forecast=result.forecast(horizon=10)
 
 volatility=np.sqrt(forecast.variance.iloc[-1,0])
 
+forecast_curve=np.sqrt(forecast.variance.values[-1])
+
 # ---------------- KPI STRIP ---------------- #
 
-col1,col2,col3,col4=st.columns(4)
+col1,col2,col3,col4,col5=st.columns(5)
 
 with col1:
-    st.metric("Selected Company",company)
+    st.metric("Company",company)
 
 with col2:
-    st.metric("Sector",industry)
+    st.metric("Industry",industry)
 
 with col3:
-    st.metric("GARCH Volatility",round(volatility,2))
+    st.metric("Current Market Price",round(current_price,2))
 
 with col4:
+    st.metric("GARCH Volatility",round(volatility,2))
+
+with col5:
 
     if volatility<1.5:
         risk="Low"
-
     elif volatility<3:
         risk="Moderate"
-
     else:
         risk="High"
 
@@ -132,16 +141,14 @@ with col4:
 
 tab1,tab2,tab3,tab4 = st.tabs([
 "Stock Overview",
+"Volatility Forecast",
 "Sector Analysis",
-"Financial Ratios",
 "Learn Financials"
 ])
 
 # ================= STOCK OVERVIEW ================= #
 
 with tab1:
-
-    st.subheader("Stock Price (Last 2 Years)")
 
     fig=go.Figure()
 
@@ -153,17 +160,42 @@ with tab1:
     ))
 
     fig.update_layout(
+    title="Stock Price (Last 2 Years)",
     xaxis_title="Date",
     yaxis_title="Price"
     )
 
     st.plotly_chart(fig,use_container_width=True)
 
-    st.subheader("Volatility Interpretation")
+# ================= VOLATILITY FORECAST ================= #
+
+with tab2:
+
+    st.subheader("GARCH Volatility Forecast Curve")
+
+    forecast_df=pd.DataFrame({
+    "Forecast Period":range(1,11),
+    "Volatility":forecast_curve
+    })
+
+    fig2=go.Figure()
+
+    fig2.add_trace(go.Scatter(
+    x=forecast_df["Forecast Period"],
+    y=forecast_df["Volatility"],
+    mode="lines+markers"
+    ))
+
+    fig2.update_layout(
+    xaxis_title="Forecast Horizon",
+    yaxis_title="Predicted Volatility"
+    )
+
+    st.plotly_chart(fig2,use_container_width=True)
 
     scale_df=pd.DataFrame({
 
-    "Range":["0 - 1.5","1.5 - 3","3+"],
+    "Range":["0-1.5","1.5-3","3+"],
 
     "Interpretation":[
     "Low Volatility",
@@ -177,9 +209,7 @@ with tab1:
 
 # ================= SECTOR ANALYSIS ================= #
 
-with tab2:
-
-    st.subheader("Sector Volatility Comparison")
+with tab3:
 
     sector_data=companies[companies["Industry"]==industry]
 
@@ -209,106 +239,59 @@ with tab2:
         except:
             pass
 
-    fig2=go.Figure()
+    fig3=go.Figure()
 
-    fig2.add_trace(go.Scatter(
+    fig3.add_trace(go.Scatter(
     x=sector_names,
     y=sector_vol,
     mode="lines+markers"
     ))
 
-    fig2.update_layout(
+    fig3.update_layout(
+    title=f"{industry} Volatility Comparison",
     xaxis_title="Companies",
-    yaxis_title="GARCH Volatility"
+    yaxis_title="Volatility"
     )
 
-    st.plotly_chart(fig2,use_container_width=True)
-
-    sector_avg=np.mean(sector_vol)
-
-    st.subheader("Sector Comparison")
-
-    comparison_df=pd.DataFrame({
-
-    "Metric":[
-    "Selected Company",
-    "Sector Average"
-    ],
-
-    "Volatility":[
-    volatility,
-    sector_avg
-    ]
-
-    })
-
-    st.table(comparison_df)
-
-# ================= FINANCIAL RATIOS ================= #
-
-with tab3:
-
-    st.subheader("Financial Ratios")
-
-    info=yf.Ticker(ticker).info
-
-    ratios={
-
-    "PE Ratio":info.get("trailingPE"),
-
-    "Price to Book":info.get("priceToBook"),
-
-    "Return on Equity":info.get("returnOnEquity"),
-
-    "Debt to Equity":info.get("debtToEquity"),
-
-    "Profit Margin":info.get("profitMargins")
-
-    }
-
-    ratio_df=pd.DataFrame(
-    ratios.items(),
-    columns=["Ratio","Value"]
-    )
-
-    st.table(ratio_df)
-
-    st.download_button(
-    "Download CSV",
-    data.to_csv(),
-    file_name=f"{ticker}_data.csv"
-    )
+    st.plotly_chart(fig3,use_container_width=True)
 
 # ================= LEARN FINANCIALS ================= #
 
 with tab4:
 
-    st.subheader("Financial Ratio Guide")
-
     learn_df=pd.DataFrame({
 
     "Ratio":[
-    "PE Ratio",
-    "Price to Book",
+    "Price-Earnings Ratio",
+    "Price-to-Book Ratio",
     "Return on Equity",
-    "Debt to Equity",
-    "Profit Margin"
+    "Debt-to-Equity Ratio",
+    "Profit Margin",
+    "Current Ratio",
+    "Quick Ratio",
+    "Interest Coverage Ratio"
     ],
 
     "Definition":[
     "Market price divided by earnings per share",
-    "Market value compared to book value",
+    "Market value relative to book value",
     "Net income divided by shareholder equity",
     "Total debt divided by equity",
-    "Net profit divided by revenue"
+    "Net profit divided by revenue",
+    "Current assets divided by current liabilities",
+    "Liquid assets divided by current liabilities",
+    "EBIT divided by interest expense"
     ],
 
     "Interpretation":[
     "Higher PE may indicate growth expectations",
-    "High PB means market values firm above asset value",
-    "Higher ROE indicates efficient capital usage",
+    "High PB suggests market values company above assets",
+    "Higher ROE means efficient capital use",
     "High ratio indicates leverage risk",
-    "Higher margin indicates profitability"
+    "Higher margin means stronger profitability",
+    "Measures short-term liquidity",
+    "Stricter liquidity indicator",
+    "Shows ability to pay interest obligations"
     ]
 
     })
