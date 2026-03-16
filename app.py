@@ -37,7 +37,7 @@ border-radius:8px;
 </style>
 """,unsafe_allow_html=True)
 
-st.title("Volatility Analytics Dashboard")
+st.title("Volatility Analysis")
 
 # ---------------- LOAD COMPANY LIST ---------------- #
 
