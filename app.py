@@ -1,240 +1,129 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import numpy as np
-from arch import arch_model
+import plotly.express as px
+
+from data_loader import load_data
+from volatility import garch_volatility
+from ratios import get_ratios
+from stocks import stocks
+from heatmap import create_heatmap
 
 st.set_page_config(layout="wide")
 
-st.title("Nifty Midcap Volatility & Financial Analysis Dashboard")
+st.title("Quant Equity Research Dashboard")
 
-# ---------------- STOCK DATABASE ---------------- #
+# -------- STOCK LIST -------- #
 
-stocks = {
-"IT":{
-"Persistent Systems":"PERSISTENT.NS",
-"Coforge":"COFORGE.NS",
-"Mphasis":"MPHASIS.NS",
-"Zensar Technologies":"ZENSARTECH.NS",
-"Tata Elxsi":"TATELXSI.NS"
-},
+all_tickers = []
 
-"Financial Services":{
-"Cholamandalam Finance":"CHOLAFIN.NS",
-"AU Small Finance Bank":"AUBANK.NS",
-"City Union Bank":"CUB.NS",
-"LIC Housing Finance":"LICHSGFIN.NS",
-"Muthoot Finance":"MUTHOOTFIN.NS"
-},
-
-"Pharma":{
-"Biocon":"BIOCON.NS",
-"Laurus Labs":"LAURUSLABS.NS",
-"Glenmark Pharma":"GLENMARK.NS",
-"Abbott India":"ABBOTINDIA.NS"
-},
-
-"Chemicals":{
-"Aarti Industries":"AARTIIND.NS",
-"Deepak Nitrite":"DEEPAKNTR.NS",
-"PI Industries":"PIIND.NS",
-"SRF":"SRF.NS"
-},
-
-"Capital Goods":{
-"Voltas":"VOLTAS.NS",
-"Escorts Kubota":"ESCORTS.NS",
-"Tube Investments":"TIINDIA.NS"
-},
-
-"Consumer":{
-"Page Industries":"PAGEIND.NS",
-"Trent":"TRENT.NS",
-"Indian Hotels":"INDHOTEL.NS"
-},
-
-"Auto":{
-"TVS Motors":"TVSMOTOR.NS",
-"Balkrishna Industries":"BALKRISIND.NS"
-}
-}
-
-# flatten stock list
-all_companies = {}
 for sector in stocks:
-    for company in stocks[sector]:
-        all_companies[company] = stocks[sector][company]
+    all_tickers += stocks[sector]
 
-
-# ---------------- NAVIGATION ---------------- #
-
-st.sidebar.header("Navigation")
-
-page = st.sidebar.selectbox(
-"Choose Section",
-[
-"Company Analysis",
-"Sector Analysis",
-"Learn Concepts"
-]
+selected = st.selectbox(
+"Select Stock",
+all_tickers
 )
 
-# ---------------- GARCH VOLATILITY FUNCTION ---------------- #
+data = load_data(selected)
 
-def garch_volatility(data):
+if not data.empty:
 
-    returns = 100 * data["Close"].pct_change().dropna()
+    col1,col2 = st.columns([3,1])
 
-    model = arch_model(returns, vol="Garch", p=1, q=1)
+    with col1:
 
-    results = model.fit(disp="off")
+        fig = px.line(
+        data,
+        y="Close",
+        title="Price Chart (2 Years)"
+        )
 
-    forecast = results.forecast(horizon=5)
+        st.plotly_chart(fig,use_container_width=True)
 
-    volatility = np.sqrt(forecast.variance.iloc[-1,0])
+    with col2:
 
-    return volatility
+        vol = garch_volatility(data["Close"])
 
+        st.metric(
+        "GARCH Volatility",
+        round(vol,2)
+        )
 
-def volatility_label(vol):
+        if vol < 1.5:
+            st.success("Low Volatility")
 
-    if vol < 1.5:
-        return "🟢 Low Volatility"
+        elif vol < 3:
+            st.warning("Moderate Volatility")
 
-    elif vol < 3:
-        return "🟡 Moderate Volatility"
+        else:
+            st.error("High Volatility")
 
-    else:
-        return "🔴 High Volatility"
+# -------- INDUSTRY COMPARISON -------- #
 
+st.subheader("Industry Comparison")
 
-# ---------------- COMPANY ANALYSIS ---------------- #
+sector_name=None
 
-if page == "Company Analysis":
+for s in stocks:
 
-    st.header("Company Analysis")
+    if selected in stocks[s]:
+        sector_name=s
 
-    company = st.selectbox(
-    "Select Nifty Midcap Company",
-    list(all_companies.keys())
-    )
+comparison=[]
 
-    ticker = all_companies[company]
+for ticker in stocks[sector_name]:
 
-    data = yf.download(ticker, period="2y")
+    d=load_data(ticker)
 
-    if data.empty:
+    if not d.empty:
 
-        st.error("Unable to load stock data")
+        v=garch_volatility(d["Close"])
 
-    else:
+        comparison.append([ticker,v])
 
-        st.subheader("Stock Price Chart (Last 2 Years)")
+df=pd.DataFrame(
+comparison,
+columns=["Stock","Volatility"]
+)
 
-        st.line_chart(data["Close"])
+st.bar_chart(df.set_index("Stock"))
 
-        st.subheader("GARCH Volatility Forecast")
+# -------- EXPORT -------- #
 
-        vol = garch_volatility(data)
+st.download_button(
+"Download CSV",
+data.to_csv(),
+"stock_data.csv"
+)
 
-        st.metric("Predicted Volatility", round(vol,3))
+# -------- SECTOR BUTTONS -------- #
 
-        st.write(volatility_label(vol))
+st.subheader("Sector Volatility")
 
-        st.subheader("Volatility Interpretation")
+cols=st.columns(len(stocks))
 
-        st.write("""
-Low volatility indicates relatively stable price movements.
+for i,sector in enumerate(stocks):
 
-Moderate volatility indicates balanced risk-return.
+    if cols[i].button(sector):
 
-High volatility suggests higher uncertainty and risk.
-""")
+        vols=[]
 
+        for ticker in stocks[sector]:
 
-# ---------------- SECTOR ANALYSIS ---------------- #
+            d=load_data(ticker)
 
-elif page == "Sector Analysis":
+            if not d.empty:
 
-    st.header("Sector Volatility Comparison")
+                vols.append(
+                garch_volatility(d["Close"])
+                )
 
-    sector_results = []
+        st.line_chart(vols)
 
-    for sector in stocks:
+# -------- RATIOS -------- #
 
-        vols = []
+st.subheader("Financial Ratios")
 
-        for company in stocks[sector]:
+ratios=get_ratios(selected)
 
-            ticker = stocks[sector][company]
-
-            data = yf.download(ticker, period="2y")
-
-            if not data.empty:
-
-                vol = garch_volatility(data)
-
-                vols.append(vol)
-
-        if vols:
-
-            avg_vol = np.mean(vols)
-
-            sector_results.append([sector, avg_vol])
-
-    df = pd.DataFrame(sector_results, columns=["Sector","Average Volatility"])
-
-    st.dataframe(df)
-
-    st.bar_chart(df.set_index("Sector"))
-
-
-# ---------------- LEARN SECTION ---------------- #
-
-elif page == "Learn Concepts":
-
-    st.header("Learn Financial Concepts")
-
-    st.subheader("GARCH Model")
-
-    st.write("""
-GARCH (Generalized Autoregressive Conditional Heteroskedasticity)
-models time-varying volatility in financial markets.
-
-Financial returns often exhibit volatility clustering —
-periods of high volatility followed by high volatility.
-
-GARCH models are widely used in risk management and
-derivatives pricing.
-""")
-
-    st.subheader("Price to Earnings Ratio")
-
-    st.write("""
-Definition:
-Market Price per Share divided by Earnings per Share.
-
-Interpretation:
-Higher PE may indicate growth expectations.
-Lower PE may indicate undervaluation.
-""")
-
-    st.subheader("Return on Equity")
-
-    st.write("""
-Definition:
-Net Income / Shareholder Equity.
-
-Interpretation:
-Higher ROE indicates efficient use of capital.
-""")
-
-    st.subheader("Debt to Equity Ratio")
-
-    st.write("""
-Definition:
-Total Debt / Shareholder Equity.
-
-Interpretation:
-Higher ratio means higher financial leverage.
-""")
+st.json(ratios)
