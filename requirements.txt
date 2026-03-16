@@ -2,5 +2,7 @@ streamlit
 yfinance
 pandas
 numpy
-arch
 plotly
+arch
+seaborn
+scikit-learn
