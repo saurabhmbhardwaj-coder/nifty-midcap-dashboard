@@ -9,35 +9,41 @@ import os
 # ---------------- PAGE SETTINGS ---------------- #
 
 st.set_page_config(
-page_title="Volatility Analysis",
+page_title="Volatility Analysis Dashboard",
 layout="wide",
 initial_sidebar_state="collapsed"
 )
 
-# ---------------- CONSULTING STYLE THEME ---------------- #
+# ---------------- DARK OLIVE THEME ---------------- #
 
 st.markdown("""
 <style>
 
 .stApp{
-background-color:#F5F5DC;
-color:#2F3E2F;
+background-color:#2F3E2F;
+color:#F5F5DC;
 }
 
-h1,h2,h3{
-color:#3A4F3A;
+h1,h2,h3,h4{
+color:#F5F5DC;
+}
+
+[data-testid="stMetric"]{
+background-color:#3E533E;
+padding:12px;
+border-radius:10px;
+color:#F5F5DC;
 }
 
 .stButton>button{
 background-color:#556B2F;
-color:white;
+color:#F5F5DC;
 border-radius:8px;
+border:none;
 }
 
-.stMetric{
-background-color:#E8E5D2;
-padding:10px;
-border-radius:10px;
+table{
+color:#F5F5DC;
 }
 
 </style>
@@ -50,7 +56,7 @@ st.title("Volatility Analysis Dashboard")
 file_path="midcap150.xlsx"
 
 if not os.path.exists(file_path):
-    st.error("midcap150.xlsx file not found in repository")
+    st.error("midcap150.xlsx file not found in repository.")
     st.stop()
 
 companies=pd.read_excel(file_path)
@@ -84,6 +90,44 @@ if data.empty:
     st.error("Unable to fetch stock data")
     st.stop()
 
+# ---------------- VOLATILITY CALCULATION ---------------- #
+
+returns=100*data["Close"].pct_change().dropna()
+
+model=arch_model(returns,p=1,q=1)
+
+result=model.fit(disp="off")
+
+forecast=result.forecast(horizon=5)
+
+volatility=np.sqrt(forecast.variance.iloc[-1,0])
+
+# ---------------- KPI STRIP ---------------- #
+
+col1,col2,col3,col4=st.columns(4)
+
+with col1:
+    st.metric("Selected Company",company)
+
+with col2:
+    st.metric("Sector",industry)
+
+with col3:
+    st.metric("GARCH Volatility",round(volatility,2))
+
+with col4:
+
+    if volatility<1.5:
+        risk="Low"
+
+    elif volatility<3:
+        risk="Moderate"
+
+    else:
+        risk="High"
+
+    st.metric("Risk Level",risk)
+
 # ---------------- TABS ---------------- #
 
 tab1,tab2,tab3,tab4 = st.tabs([
@@ -93,75 +137,49 @@ tab1,tab2,tab3,tab4 = st.tabs([
 "Learn Financials"
 ])
 
-# ================= STOCK TAB ================= #
+# ================= STOCK OVERVIEW ================= #
 
 with tab1:
 
-    col1,col2=st.columns([3,1])
+    st.subheader("Stock Price (Last 2 Years)")
 
-    with col1:
+    fig=go.Figure()
 
-        fig=go.Figure()
+    fig.add_trace(go.Scatter(
+    x=data["Date"],
+    y=data["Close"],
+    mode="lines",
+    name="Price"
+    ))
 
-        fig.add_trace(go.Scatter(
-        x=data["Date"],
-        y=data["Close"],
-        mode="lines",
-        name="Price"
-        ))
+    fig.update_layout(
+    xaxis_title="Date",
+    yaxis_title="Price"
+    )
 
-        fig.update_layout(
-        title=f"{company} Price Chart (2 Years)",
-        xaxis_title="Date",
-        yaxis_title="Price"
-        )
+    st.plotly_chart(fig,use_container_width=True)
 
-        st.plotly_chart(fig,use_container_width=True)
+    st.subheader("Volatility Interpretation")
 
-    returns=100*data["Close"].pct_change().dropna()
+    scale_df=pd.DataFrame({
 
-    model=arch_model(returns,p=1,q=1)
+    "Range":["0 - 1.5","1.5 - 3","3+"],
 
-    result=model.fit(disp="off")
+    "Interpretation":[
+    "Low Volatility",
+    "Moderate Volatility",
+    "High Volatility"
+    ]
 
-    forecast=result.forecast(horizon=5)
+    })
 
-    volatility=np.sqrt(forecast.variance.iloc[-1,0])
+    st.table(scale_df)
 
-    with col2:
-
-        st.metric("GARCH Volatility",round(volatility,2))
-
-        if volatility<1.5:
-            st.success("Low Volatility")
-
-        elif volatility<3:
-            st.warning("Moderate Volatility")
-
-        else:
-            st.error("High Volatility")
-
-        st.write("### Volatility Interpretation")
-
-        scale_df=pd.DataFrame({
-
-        "Range":["0 - 1.5","1.5 - 3","3+"],
-
-        "Meaning":[
-        "Low Risk",
-        "Moderate Risk",
-        "High Risk"
-        ]
-
-        })
-
-        st.table(scale_df)
-
-# ================= SECTOR TAB ================= #
+# ================= SECTOR ANALYSIS ================= #
 
 with tab2:
 
-    st.subheader("Sector Volatility Analysis")
+    st.subheader("Sector Volatility Comparison")
 
     sector_data=companies[companies["Industry"]==industry]
 
@@ -191,21 +209,20 @@ with tab2:
         except:
             pass
 
-    fig3=go.Figure()
+    fig2=go.Figure()
 
-    fig3.add_trace(go.Scatter(
+    fig2.add_trace(go.Scatter(
     x=sector_names,
     y=sector_vol,
     mode="lines+markers"
     ))
 
-    fig3.update_layout(
-    title=f"{industry} Volatility Comparison",
+    fig2.update_layout(
     xaxis_title="Companies",
     yaxis_title="GARCH Volatility"
     )
 
-    st.plotly_chart(fig3,use_container_width=True)
+    st.plotly_chart(fig2,use_container_width=True)
 
     sector_avg=np.mean(sector_vol)
 
@@ -262,11 +279,11 @@ with tab3:
     file_name=f"{ticker}_data.csv"
     )
 
-# ================= LEARN TAB ================= #
+# ================= LEARN FINANCIALS ================= #
 
 with tab4:
 
-    st.subheader("Learn Financial Ratios")
+    st.subheader("Financial Ratio Guide")
 
     learn_df=pd.DataFrame({
 
@@ -288,10 +305,10 @@ with tab4:
 
     "Interpretation":[
     "Higher PE may indicate growth expectations",
-    "High value means market values company above assets",
+    "High PB means market values firm above asset value",
     "Higher ROE indicates efficient capital usage",
-    "Higher ratio means more financial leverage",
-    "Higher margin indicates better profitability"
+    "High ratio indicates leverage risk",
+    "Higher margin indicates profitability"
     ]
 
     })
