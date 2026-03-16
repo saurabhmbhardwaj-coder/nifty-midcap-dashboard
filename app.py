@@ -7,7 +7,7 @@ from arch import arch_model
 import os
 
 st.set_page_config(
-page_title="Volatility Analytics Dashboard",
+page_title="Volatility Analysis",
 layout="wide",
 initial_sidebar_state="collapsed"
 )
